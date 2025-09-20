@@ -1,0 +1,246 @@
+const express = require("express");
+const router = express.Router();
+const multer = require("multer");
+const Product = require("../models/ProductSchema");
+const Category = require("../models/CategorySchema");
+
+const fs = require("fs");
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "./public/images");
+  },
+  filename: function (req, file, cb) {
+    const filename = Date.now() + "-" + file.originalname;
+    cb(null, filename);
+  },
+});
+const upload = multer({ storage: storage });
+
+// i think i should add purshase relation that help the admin to know how many purshase for each product
+// when the admin add new product i should add the product to purcahse when he update i should update the purshase
+// when he delete the product i should delete the purshase
+//when he add quantity to the product i should add the quantity to the purshase
+
+router.post("/", upload.array("images", 5), async (req, res) => {
+  try {
+    let {
+      name,
+      description,
+      wholesaleprice,
+      retailprice,
+      categoryId,
+      discount,
+      sizes,
+      Colorvariants,
+    } = req.body;
+
+    if (
+      !name ||
+      !description ||
+      !wholesaleprice ||
+      !retailprice ||
+      !categoryId
+    ) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+
+    const category = await Category.findById(categoryId);
+    if (!category) {
+      return res.status(400).json({ error: "Invalid category ID" });
+    }
+
+    if (typeof sizes === "string") {
+      sizes = JSON.parse(sizes);
+    }
+    if (typeof Colorvariants === "string") {
+      Colorvariants = JSON.parse(Colorvariants);
+    }
+
+    const newProduct = new Product({
+      name,
+      description,
+      wholesaleprice,
+      retailprice,
+      discount: discount || 0,
+      category: categoryId,
+      images: req.files.map((file) => file.filename),
+      sizes: sizes,
+      Colorvariants: Colorvariants,
+    });
+
+    await newProduct.save();
+    res.status(201).json(newProduct);
+  } catch (error) {
+    console.error("Error creating product:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+// i should check if the qunantity for each size or color variant is positive number
+// سعر الحملة
+router.put("/addquantity/:id", async (req, res) => {
+  try {
+    const { quantity, colorVariants, sizes } = req.body;
+    if (!quantity || quantity <= 0) {
+      return res
+        .status(400)
+        .json({ error: "Quantity must be a positive number" });
+    }
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+     product.quantity += quantity;
+
+    if (colorVariants && Array.isArray(colorVariants)) {
+      colorVariants.forEach((variant) => {
+        const existingVariant = product.colorVariants.find(
+          (v) => v.colorName === variant.colorName
+        );
+        if (existingVariant) {
+          variant.qty += quantity;
+
+          if (variant.sizes && Array.isArray(variant.sizes)) {
+            variant.sizes.forEach((size) => {
+              const existingSize = variant.sizes.find(
+                (s) => s.name === size.name
+              );
+              if (existingSize) {
+                existingSize.qty += quantity;
+              }
+            });
+          }
+        }
+      });
+    }
+
+    if (sizes && Array.isArray(sizes)) {
+      sizes.forEach((size) => {
+        const existingSize = product.sizes.find(
+          (s) => s.sizeName === size.sizeName
+        );
+        if (existingSize) {
+          existingSize.qty += quantity;
+        }
+      });
+    }
+
+    await product.save();
+    res.json({ message: "Quantity added successfully", product });
+  } catch (err) {
+    console.error("Error adding quantity:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/:id", upload.array("images", 5), async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      wholesaleprice,
+      retailprice,
+      discount,
+      categoryId,
+      sizes,
+      Colorvariants,
+      isFeatured,
+    } = req.body;
+
+    const product = await Product.findById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    if (categoryId) {
+      const category = await Category.findById(categoryId);
+      if (!category) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+      product.category = categoryId;
+    }
+
+    if (req.files && req.files.length > 0) {
+      const imagePaths = req.files.map((file) => file.filename);
+      product.images = imagePaths;
+    }
+
+    if (name) product.name = name;
+    if (description) product.description = description;
+    if (wholesaleprice) product.wholesaleprice = wholesaleprice;
+    if (retailprice) product.retailprice = retailprice;
+    if (discount) product.discount = discount;
+    if (typeof isFeatured !== "undefined")
+      product.isFeatured = isFeatured === "true";
+
+    if (sizes) product.sizes = sizes;
+    if (Colorvariants) product.Colorvariants = Colorvariants;
+
+    await product.save();
+
+    res.json(product);
+  } catch (err) {
+    console.error("Error updating product:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id).populate("category");
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+    res.json(product);
+  } catch (err) {
+    console.error("Error fetching product:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/", async (req, res) => {
+  try {
+    const { page = 1, limit = 10, category, featured, q } = req.query;
+    const filter = {};
+
+    if (category) filter.category = category;
+    if (featured) filter.isFeatured = featured === "true";
+    if (q) filter.name = { $regex: q, $options: "i" };
+
+    const products = await Product.find(filter)
+      .populate("category")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit));
+
+    const total = await Product.countDocuments(filter);
+
+    res.json({ total, page: parseInt(page), limit: parseInt(limit), products });
+  } catch (err) {
+    console.error("Error fetching products:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/:id", async (req, res) => {
+  try {
+    const product = await Product.findByIdAndDelete(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    product.images.forEach((img) => {
+      const filePath = `./public/images/${img}`;
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    });
+
+    res.json({ message: "Product deleted successfully", product });
+  } catch (err) {
+    console.error("Error deleting product:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+module.exports = router;
