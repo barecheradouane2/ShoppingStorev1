@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const Product = require("../models/ProductSchema");
 const Category = require("../models/CategorySchema");
+const Expense = require("../models/ExpenseSchema");
 
 const fs = require("fs");
 
@@ -70,6 +71,14 @@ router.post("/", upload.array("images", 5), async (req, res) => {
     });
 
     await newProduct.save();
+
+     const newExpense = new Expense({ expenseName: name, price: wholesaleprice });
+      await newExpense.save();
+
+
+
+
+
     res.status(201).json(newProduct);
   } catch (error) {
     console.error("Error creating product:", error);
@@ -80,11 +89,11 @@ router.post("/", upload.array("images", 5), async (req, res) => {
 // سعر الحملة
 router.put("/addquantity/:id", async (req, res) => {
   try {
-    const { quantity, colorVariants, sizes } = req.body;
-    if (!quantity || quantity <= 0) {
+    const { quantity, wholesaleprice, colorVariants, sizes } = req.body;
+    if (!quantity || quantity <= 0 || !wholesaleprice || wholesaleprice <= 0) {
       return res
         .status(400)
-        .json({ error: "Quantity must be a positive number" });
+        .json({ error: "Quantity and wholesale price must be positive numbers" });
     }
     const product = await Product.findById(req.params.id);
     if (!product) {
@@ -126,6 +135,14 @@ router.put("/addquantity/:id", async (req, res) => {
     }
 
     await product.save();
+
+      const newExpense = new Expense({ expenseName: product.name, price: wholesaleprice });
+      await newExpense.save();
+
+
+
+
+
     res.json({ message: "Quantity added successfully", product });
   } catch (err) {
     console.error("Error adding quantity:", err);
@@ -167,7 +184,18 @@ router.put("/:id", upload.array("images", 5), async (req, res) => {
 
     if (name) product.name = name;
     if (description) product.description = description;
-    if (wholesaleprice) product.wholesaleprice = wholesaleprice;
+    if (wholesaleprice){
+     
+      const oldExpense = await Expense.findOne({ expenseName: product.name, price: wholesaleprice,date:product.createdAt });
+       product.wholesaleprice = wholesaleprice;
+      if (oldExpense) {
+        oldExpense.price = wholesaleprice;
+        await oldExpense.save();
+      } else {
+      const newExpense = new Expense({ expenseName: product.name, price: wholesaleprice });
+      await newExpense.save();
+      }
+    } 
     if (retailprice) product.retailprice = retailprice;
     if (discount) product.discount = discount;
     if (typeof isFeatured !== "undefined")
