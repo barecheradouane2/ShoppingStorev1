@@ -1,9 +1,9 @@
 // utils/stockHandler.js
-const Product = require("../models/Product");
+const Product = require("../models/ProductSchema");
 
 async function handleProductStock(orderItems, action = "decrease") {
   for (const item of orderItems) {
-    const product = await Product.findById(item.productId);
+    const product = await Product.findById(item.product);
     if (!product) continue;
 
     const qtyChange = action === "decrease" ? -item.quantity : item.quantity;
@@ -23,6 +23,7 @@ async function handleProductStock(orderItems, action = "decrease") {
         }
       }
     }
+    console.log("product after colorVariants update:", product);
 
     // Handle sizes (no color)
     if ((!product.colorVariants || product.colorVariants.length === 0) && product.sizes && product.sizes.length > 0) {

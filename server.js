@@ -13,6 +13,7 @@ app.use("/categories", require("./routes/CategoryRoutes"));
 app.use("/products", require("./routes/ProductRoutes"));
 app.use("/expenses", require("./routes/ExpenseRoutes"));
 app.use("/shippings", require("./routes/ShippingRoutes"));
+app.use("/orders", require("./routes/OrderRoutes"));
 
 
 

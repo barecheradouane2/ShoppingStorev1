@@ -50,7 +50,7 @@ router.get("/", async (req, res) => {
 });
 
 
-route.get("/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
     try {
         const expense = await Expense.findById(req.params.id);
         if (!expense) {

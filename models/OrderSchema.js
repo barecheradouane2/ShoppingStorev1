@@ -1,10 +1,19 @@
 const mongoose = require('mongoose');
-const OrderItemSchema = require('./OrderItemSchema');
+
+const OrderItemSchema = require("./OrderItemSchema");
+
+
+// i think when the order is confirmed i should add the user name of the user who confirmed the order and the date of confirmation
+// what do you suggest ?
+
+
 
 const OrderSchema = new mongoose.Schema(
   {
     orderDate: { type: Date, default: Date.now },
-    totalPrice: { type: Number, required: true },
+    totalPrice: { type: Number},
+    // confirmedBy: { type: String }, 
+    // confirmedAt: { type: Date }, 
 
     orderStatus: {
       type: String,
@@ -25,8 +34,9 @@ const OrderSchema = new mongoose.Schema(
 
     Shipping: { type: mongoose.Schema.Types.ObjectId, ref: 'Shipping', required: true },
    
+     orderItems: [OrderItemSchema],
 
-    orderItems: [OrderItemSchema] // Embedded array of order items
+   // Embedded array of order items
   },
   { timestamps: true }
 );

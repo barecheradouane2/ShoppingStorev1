@@ -38,7 +38,7 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    if (orderStatus === "confirmed") {
+    if (orderStatus == "confirmed") {
 
      await handleProductStock(orderItems, "decrease");
 
