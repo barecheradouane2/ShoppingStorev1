@@ -28,6 +28,7 @@ router.post("/", upload.array("images", 5), async (req, res) => {
     let {
       name,
       description,
+      quantity,
       wholesaleprice,
       retailprice,
       categoryId,
@@ -60,6 +61,7 @@ router.post("/", upload.array("images", 5), async (req, res) => {
 
     const newProduct = new Product({
       name,
+      quantity,
       description,
       wholesaleprice,
       retailprice,
@@ -67,17 +69,16 @@ router.post("/", upload.array("images", 5), async (req, res) => {
       category: categoryId,
       images: req.files.map((file) => file.filename),
       sizes: sizes,
-      Colorvariants: Colorvariants,
+      colorVariants: Colorvariants,
     });
 
     await newProduct.save();
 
-     const newExpense = new Expense({ expenseName: name, price: wholesaleprice });
-      await newExpense.save();
-
-
-
-
+    const newExpense = new Expense({
+      expenseName: name,
+      price: wholesaleprice,
+    });
+    await newExpense.save();
 
     res.status(201).json(newProduct);
   } catch (error) {
@@ -91,15 +92,15 @@ router.put("/addquantity/:id", async (req, res) => {
   try {
     const { quantity, wholesaleprice, colorVariants, sizes } = req.body;
     if (!quantity || quantity <= 0 || !wholesaleprice || wholesaleprice <= 0) {
-      return res
-        .status(400)
-        .json({ error: "Quantity and wholesale price must be positive numbers" });
+      return res.status(400).json({
+        error: "Quantity and wholesale price must be positive numbers",
+      });
     }
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ error: "Product not found" });
     }
-     product.quantity += quantity;
+    product.quantity += quantity;
 
     if (colorVariants && Array.isArray(colorVariants)) {
       colorVariants.forEach((variant) => {
@@ -136,12 +137,11 @@ router.put("/addquantity/:id", async (req, res) => {
 
     await product.save();
 
-      const newExpense = new Expense({ expenseName: product.name, price: wholesaleprice });
-      await newExpense.save();
-
-
-
-
+    const newExpense = new Expense({
+      expenseName: product.name,
+      price: wholesaleprice,
+    });
+    await newExpense.save();
 
     res.json({ message: "Quantity added successfully", product });
   } catch (err) {
@@ -184,18 +184,24 @@ router.put("/:id", upload.array("images", 5), async (req, res) => {
 
     if (name) product.name = name;
     if (description) product.description = description;
-    if (wholesaleprice){
-     
-      const oldExpense = await Expense.findOne({ expenseName: product.name, price: wholesaleprice,date:product.createdAt });
-       product.wholesaleprice = wholesaleprice;
+    if (wholesaleprice) {
+      const oldExpense = await Expense.findOne({
+        expenseName: product.name,
+        price: wholesaleprice,
+        date: product.createdAt,
+      });
+      product.wholesaleprice = wholesaleprice;
       if (oldExpense) {
         oldExpense.price = wholesaleprice;
         await oldExpense.save();
       } else {
-      const newExpense = new Expense({ expenseName: product.name, price: wholesaleprice });
-      await newExpense.save();
+        const newExpense = new Expense({
+          expenseName: product.name,
+          price: wholesaleprice,
+        });
+        await newExpense.save();
       }
-    } 
+    }
     if (retailprice) product.retailprice = retailprice;
     if (discount) product.discount = discount;
     if (typeof isFeatured !== "undefined")
@@ -228,26 +234,164 @@ router.get("/:id", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const { page = 1, limit = 10, category, featured, q } = req.query;
+    const { page = 1, limit = 5, category, featured, q } = req.query;
     const filter = {};
 
+    // basic filters
     if (category) filter.category = category;
     if (featured) filter.isFeatured = featured === "true";
-    if (q) filter.name = { $regex: q, $options: "i" };
 
-    const products = await Product.find(filter)
-      .populate("category")
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit));
+    // search filter
+    if (q) {
+      // find matching category IDs first
+      const cats = await Category.find({
+        name: { $regex: q, $options: "i" },
+      }).select("_id");
 
-    const total = await Product.countDocuments(filter);
+      const catIds = cats.map((c) => c._id);
 
-    res.json({ total, page: parseInt(page), limit: parseInt(limit), products });
+      filter.$or = [
+        { name: { $regex: q, $options: "i" } },
+        { category: { $in: catIds } },
+      ];
+    }
+
+    // run queries in parallel
+    const [stats, total, products] = await Promise.all([
+      // combined aggregation stats
+      Product.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalQuantity: { $sum: "$quantity" },
+            valueOfStock: {
+             $sum: "$wholesaleprice"
+            },
+            estimatedIncome: {
+              $sum: { $multiply: ["$retailprice", "$quantity"] },
+            },
+          },
+        },
+      ]),
+
+      // total count for pagination
+      Product.countDocuments(filter),
+
+      // paginated product list
+      Product.find(filter)
+        .populate("category", "name")
+        .skip((page - 1) * limit)
+        .limit(parseInt(limit))
+        .lean(),
+    ]);
+
+    const statsObj = stats[0] || {};
+
+    res.json({
+      totalstock: statsObj.totalQuantity || 0,
+      valueofstock: statsObj.valueOfStock || 0,
+      estimatedincome: (statsObj.estimatedIncome - statsObj.valueOfStock) || 0,
+      total,
+      totalPages: Math.ceil(total / limit),
+      page: parseInt(page),
+      limit: parseInt(limit),
+      products,
+    });
   } catch (err) {
     console.error("Error fetching products:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// router.get("/", async (req, res) => {
+//   try {
+//     const { page = 1, limit = 10, category, featured, q } = req.query;
+//     const filter = {};
+
+//     if (category) filter.category = category;
+//     if (featured) filter.isFeatured = featured === "true";
+//     if (q) {
+//       filter.$or = [
+//         { name: { $regex: q, $options: "i" } },
+//         { "category.name": { $regex: q, $options: "i" } }, // <-- dot notation
+//       ];
+//     }
+
+//     // if (q){
+//     //   filter.name = { $regex: q, $options: "i" };
+//     //   filter.category.name = { $regex: q, $options: "i" };
+
+//     // }
+
+//     //     if (q) {
+//     //
+//     //   const cats = await Category.find({
+//     //     name: { $regex: q, $options: 'i' }
+//     //   }).select('_id');
+
+//     //   const catIds = cats.map(c => c._id);
+
+//     //   // 2. build product filter
+//     //   filter.$or = [
+//     //     { name: { $regex: q, $options: 'i' } },
+//     //     { category: { $in: catIds } }
+//     //   ];
+//     // }
+
+//     const totalstock = await Product.aggregate([
+//       {
+//         $group: {
+//           _id: null,
+//           totalQuantity: { $sum: "$quantity" },
+//         },
+//       },
+//     ]);
+
+//     const valueofstock = await Product.aggregate([
+//       {
+//         $group: {
+//           _id: null,
+//           totalQuantity: { $sum: "$wholesaleprice" },
+//         },
+//       },
+//     ]);
+
+//     const estimatedincome = await Product.aggregate([
+//       {
+//         $project: {
+//           total: { $multiply: ["$retailprice", "$quantity"] }, // compute price × qty per product
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: null,
+//           grandTotal: { $sum: "$total" }, // sum all those totals
+//         },
+//       },
+//     ]);
+
+//     const products = await Product.find(filter)
+//       .populate("category", "name")
+//       .skip((page - 1) * limit)
+//       .limit(parseInt(limit));
+
+//     const total = await Product.countDocuments(filter);
+
+//     res.json({
+//       totalstock: totalstock[0] ? totalstock[0].totalQuantity : 0,
+//       valueofstock: valueofstock[0] ? valueofstock[0].totalQuantity : 0,
+//       estimatedincome: estimatedincome[0] ? estimatedincome[0].grandTotal : 0,
+//       total,
+//       totalPages: Math.ceil(total / limit),
+//       page: parseInt(page),
+//       limit: parseInt(limit),
+//       products,
+//     });
+//   } catch (err) {
+//     console.error("Error fetching products:", err);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
 
 router.delete("/:id", async (req, res) => {
   try {

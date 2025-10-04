@@ -7,7 +7,11 @@ dotenv.config();
 const connectDB = require('./config/db');
 connectDB();
 
+app.use(cors());
+
 app.use(express.json());
+
+
 app.use("/users", require("./routes/UsersRoutes"));
 app.use("/categories", require("./routes/CategoryRoutes"));
 app.use("/products", require("./routes/ProductRoutes"));
@@ -15,10 +19,11 @@ app.use("/expenses", require("./routes/ExpenseRoutes"));
 app.use("/shippings", require("./routes/ShippingRoutes"));
 app.use("/orders", require("./routes/OrderRoutes"));
 
+app.use("/images", express.static("images"));
 
 
 
-app.use(cors());
+
 
 
 

@@ -42,7 +42,18 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     
-    let { page = 1, limit = 10 } = req.query;
+    let { page = 1, limit = 10 ,all  } = req.query;
+
+    if (all == "true") {
+    
+    const categories = await Category.find({});
+    return res.json({
+      total: categories.length,
+      categories,
+    });
+  }
+
+
     page = parseInt(page);
     limit = parseInt(limit);
 

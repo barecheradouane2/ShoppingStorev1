@@ -28,14 +28,20 @@ const ProductSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 ProductSchema.pre('save', function(next) {
-  if (this.colorVariants && this.colorVariants.length) {
+
+  if (this.isModified('quantity') && !this.colorVariants.length >0 && !this.sizes.length>0) {
+    return next();
+  }
+
+
+  if (this.colorVariants && this.colorVariants.length >0) {
     this.quantity = this.colorVariants.reduce((sum, v) => {
       if (v.sizes && v.sizes.length) {
         return sum + v.sizes.reduce((s, sz) => s + (sz.qty || 0), 0);
       }
       return sum + (v.qty || 0);
     }, 0);
-  } else if (this.colorVariants.length === 0 && this.sizes && this.sizes.length) {
+  } else if (this.colorVariants.length === 0 && this.sizes && this.sizes.length>0) {
     this.quantity = this.sizes.reduce((s, sz) => s + (sz.qty || 0), 0);
   }
   next();

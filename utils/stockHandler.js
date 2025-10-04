@@ -23,7 +23,7 @@ async function handleProductStock(orderItems, action = "decrease") {
         }
       }
     }
-    console.log("product after colorVariants update:", product);
+    
 
     // Handle sizes (no color)
     if ((!product.colorVariants || product.colorVariants.length === 0) && product.sizes && product.sizes.length > 0) {
