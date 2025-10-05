@@ -8,15 +8,16 @@ const Category = require("../models/CategorySchema");
 const multer = require('multer');
 
 
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, './public/images')
+    cb(null, "./public/images");
   },
   filename: function (req, file, cb) {
-    const filename = Date.now() + '-' + file.fieldname
-    cb(null, filename)
-  }
-})
+    const filename = Date.now() + "-" + file.originalname;
+    cb(null, filename);
+  },
+});
 
 const upload = multer({ storage: storage })
 
@@ -28,7 +29,7 @@ router.post("/", upload.single("image"), async (req, res) => {
     const newCategory = new Category({
       name,
       description,
-      image: req.file ? req.file.filename : ""  
+      Image: req.file ? req.file.filename : null, 
     });
 
     await newCategory.save();
@@ -42,7 +43,7 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     
-    let { page = 1, limit = 10 ,all  } = req.query;
+    let { page = 1, limit = 7 ,all  } = req.query;
 
     if (all == "true") {
     
