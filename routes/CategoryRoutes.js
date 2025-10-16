@@ -1,13 +1,10 @@
-
 const express = require("express");
 
 const router = express.Router();
 
 const Category = require("../models/CategorySchema");
 
-const multer = require('multer');
-
-
+const multer = require("multer");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -19,8 +16,7 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage: storage })
-
+const upload = multer({ storage: storage });
 
 router.post("/", upload.single("image"), async (req, res) => {
   try {
@@ -29,7 +25,7 @@ router.post("/", upload.single("image"), async (req, res) => {
     const newCategory = new Category({
       name,
       description,
-      Image: req.file ? req.file.filename : null, 
+      Image: req.file ? req.file.filename : null,
     });
 
     await newCategory.save();
@@ -42,26 +38,21 @@ router.post("/", upload.single("image"), async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    
-    let { page = 1, limit = 7 ,all  } = req.query;
+    let { page = 1, limit = 7, all } = req.query;
 
     if (all == "true") {
-    
-    const categories = await Category.find({});
-    return res.json({
-      total: categories.length,
-      categories,
-    });
-  }
-
+      const categories = await Category.find({});
+      return res.json({
+        total: categories.length,
+        categories,
+      });
+    }
 
     page = parseInt(page);
     limit = parseInt(limit);
 
-    
     const total = await Category.countDocuments();
 
-   
     const categories = await Category.find()
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -84,14 +75,14 @@ router.get("/:id", async (req, res) => {
   try {
     const categoryId = req.params.id;
 
-   
     const category = await Category.findById(categoryId);
     if (!category) {
       return res.status(404).json({ error: "Category not found" });
     }
 
-    
-    const products = await Product.find({ category: categoryId }).sort({ createdAt: -1 });
+    const products = await Product.find({ category: categoryId }).sort({
+      createdAt: -1,
+    });
 
     // Embed products inside category
     const categoryWithProducts = {
@@ -106,7 +97,6 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const { name, description } = req.body;
@@ -115,7 +105,11 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       updatedData.image = req.file.filename;
     }
 
-    const category = await Category.findByIdAndUpdate(req.params.id, updatedData, { new: true });
+    const category = await Category.findByIdAndUpdate(
+      req.params.id,
+      updatedData,
+      { new: true }
+    );
     if (!category) {
       return res.status(404).json({ error: "Category not found" });
     }

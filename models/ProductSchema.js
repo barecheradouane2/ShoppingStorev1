@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 
 const SizeSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  qty: { type: Number, required: true, min: 0 }
+  name: { type: String },
+  qty: { type: Number, min: 0 }
 });
 
 const ColorVariantSchema = new mongoose.Schema({
-  colorName: { type: String, required: true },
+  name: { type: String, required: true },
   colorCode: { type: String },
   qty: { type: Number, default: 0, min: 0 },
   sizes: [SizeSchema]

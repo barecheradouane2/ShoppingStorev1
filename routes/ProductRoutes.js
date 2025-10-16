@@ -234,7 +234,7 @@ router.get("/:id", async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const { page = 1, limit = 5, category, featured, q } = req.query;
+    const { page = 1, limit = 5, category, featured, q ,all } = req.query;
     const filter = {};
 
     // basic filters
@@ -254,6 +254,10 @@ router.get("/", async (req, res) => {
         { name: { $regex: q, $options: "i" } },
         { category: { $in: catIds } },
       ];
+    }
+    if (all === "true") {
+      const products = await Product.find(filter).populate("category", "name");
+      return res.json({ total: products.length, products });
     }
 
     // run queries in parallel

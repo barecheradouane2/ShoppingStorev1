@@ -6,11 +6,118 @@ const Product = require("../models/ProductSchema");
 
 const isEqual = require("lodash.isequal");
 
-
 const { handleProductStock } = require("../utils/stockHandler");
 
+const mongoose = require("mongoose");
 
-// Create a new order
+router.get("/stats", async (req, res) => {
+  try {
+    const today = new Date();
+
+    const startOfToday = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      today.getDate()
+    );
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(today.getDate() - 7);
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    const [todayOrders, sevenDaysOrders, thirtyDaysOrders, allTimeOrders] =
+      await Promise.all([
+        Order.find({ createdAt: { $gte: startOfToday } }),
+        Order.find({ createdAt: { $gte: sevenDaysAgo } }),
+        Order.find({ createdAt: { $gte: thirtyDaysAgo } }),
+        Order.find({}),
+      ]);
+
+    const stats = {
+      today: {
+        orders: todayOrders.length,
+        sales: todayOrders.reduce((acc, o) => acc + o.totalPrice, 0),
+      },
+      last7days: {
+        orders: sevenDaysOrders.length,
+        sales: sevenDaysOrders.reduce((acc, o) => acc + o.totalPrice, 0),
+      },
+      last30days: {
+        orders: thirtyDaysOrders.length,
+        sales: thirtyDaysOrders.reduce((acc, o) => acc + o.totalPrice, 0),
+      },
+      allTime: {
+        orders: allTimeOrders.length,
+        sales: allTimeOrders.reduce((acc, o) => acc + o.totalPrice, 0),
+      },
+    };
+
+    const allStatuses = [
+      "confirmed",
+      "pending",
+      "shipped",
+      "cancelled",
+      "delivered",
+    ];
+    const statsStatus = Object.fromEntries(
+      allStatuses.map((status) => [
+        status,
+        allTimeOrders.filter((o) => o.orderStatus === status).length,
+      ])
+    );
+
+    res.json({ stats, statsStatus });
+  } catch (error) {
+    console.error("Error fetching total sales:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/stats/last7days", async (req, res) => {
+  try {
+    const today = new Date();
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(today.getDate() - 6);
+
+    const stats = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: sevenDaysAgo },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+          },
+          totalOrders: { $sum: 1 },
+          totalSales: { $sum: "$totalPrice" },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    const result = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date();
+      date.setDate(today.getDate() - i);
+      const dateStr = date.toISOString().split("T")[0];
+      const dayStat = stats.find((s) => s._id === dateStr);
+      result.unshift({
+        date: dateStr,
+        totalOrders: dayStat ? dayStat.totalOrders : 0,
+        totalSales: dayStat ? dayStat.totalSales : 0,
+      });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error fetching last 7 days stats:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.post("/", async (req, res) => {
   try {
     const {
@@ -22,9 +129,10 @@ router.post("/", async (req, res) => {
       address,
       shippingStatus,
       Shipping,
-      orderItems
+      orderItems,
     } = req.body;
 
+    // ✅ 1. Validation
     if (
       !fullName ||
       !telephone ||
@@ -38,13 +146,24 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    if (orderStatus == "confirmed") {
+    // ✅ 2. Safely convert product IDs to ObjectId
+    const formattedOrderItems = orderItems.map((item) => {
+      if (!item.product) {
+        throw new Error("Order item is missing a product ID");
+      }
 
-     await handleProductStock(orderItems, "decrease");
+      return {
+        ...item,
+        product: new mongoose.Types.ObjectId(item.product),
+      };
+    });
 
-      
+    // ✅ 3. Handle stock if confirmed
+    if (orderStatus === "confirmed") {
+      await handleProductStock(formattedOrderItems, "decrease");
     }
 
+    // ✅ 4. Create the order
     const newOrder = new Order({
       orderStatus,
       fullName,
@@ -54,11 +173,18 @@ router.post("/", async (req, res) => {
       address,
       shippingStatus,
       Shipping,
-      orderItems
+      orderItems: formattedOrderItems,
     });
 
     await newOrder.save();
-    res.status(201).json(newOrder);
+
+    // ✅ 5. Populate product details in the response
+    const populatedOrder = await newOrder.populate({
+      path: "orderItems.product",
+      select: "name ",
+    });
+
+    res.status(201).json(populatedOrder);
   } catch (error) {
     console.error("Error creating order:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -69,7 +195,16 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const orderId = req.params.id;
-    const { orderStatus, shippingStatus, wilaya, commune, address, orderItems, telephone, fullName } = req.body;
+    const {
+      orderStatus,
+      shippingStatus,
+      wilaya,
+      commune,
+      address,
+      orderItems,
+      telephone,
+      fullName,
+    } = req.body;
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -79,7 +214,10 @@ router.put("/:id", async (req, res) => {
     // Handle status changes
     if (orderStatus === "confirmed" && order.orderStatus !== "confirmed") {
       await handleProductStock(orderItems, "decrease");
-    } else if (orderStatus !== "confirmed" && order.orderStatus === "confirmed") {
+    } else if (
+      orderStatus !== "confirmed" &&
+      order.orderStatus === "confirmed"
+    ) {
       await handleProductStock(order.orderItems, "increase");
     }
 
@@ -111,23 +249,237 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// get all order with pagination 
+// get all order with pagination
+
+// router.get("/", async (req, res) => {
+//   try {
+//     // 🔹 Pagination and query params
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 7;
+//     const q = req.query.q?.trim() || "";
+//     const all = req.query.all === "true";
+//     const skip = (page - 1) * limit;
+
+//     // 🔹 Optional search filter
+//     const searchFilter = q
+//   ? {
+//       $or: [
+//         { fullName: { $regex: q, $options: "i" } },
+//         { wilaya: { $regex: q, $options: "i" } },
+//         { telephone: { $regex: q, $options: "i" } },
+//         { orderStatus: { $regex: q, $options: "i" } },
+//         { commune: { $regex: q, $options: "i" } },
+//         // Search by product name in orderItems (via aggregation-style query)
+//         {
+//           orderItems: {
+//             $elemMatch: {
+//               name: { $regex: q, $options: "i" },
+//             },
+//           },
+//         },
+//       ],
+//     }
+//   : {};
+
+//     if (all) {
+//       const orders = await Order.find(searchFilter)
+//         .sort({ createdAt: -1 })
+//         .populate({ path: "Shipping", select: "deskprice homeprice" })
+//         .populate({ path: "orderItems.product", select: "name" });
+
+//       return res.json({
+//         total: orders.length,
+//         stats: {},
+//         orders,
+//       });
+//     }
+
+//     const [counts, totalOrders, orders] = await Promise.all([
+//       // Aggregation for stats
+//       Order.aggregate([
+//         { $match: searchFilter },
+//         { $group: { _id: "$orderStatus", count: { $sum: 1 } } },
+//       ]),
+
+//       Order.countDocuments(searchFilter),
+
+//       Order.find(searchFilter)
+//         .sort({ createdAt: -1 })
+//         .skip(skip)
+//         .limit(limit)
+//         .populate({ path: "Shipping", select: "deskprice homeprice" })
+//         .populate({ path: "orderItems.product", select: "name" }),
+//     ]);
+
+//     const allStatuses = [
+//       "confirmed",
+//       "pending",
+//       "shipped",
+//       "cancelled",
+//       "delivered",
+//     ];
+//     const stats = Object.fromEntries(
+//       allStatuses.map((status) => [
+//         status,
+//         counts.find((c) => c._id === status)?.count || 0,
+//       ])
+//     );
+
+//     // 🔹 Response
+//     res.json({
+//        stats,
+//       totalPages: Math.ceil(totalOrders / limit),
+//       currentPage: page,
+//       totalOrders,
+//       orders,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching orders:", error);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// });
 
 router.get("/", async (req, res) => {
   try {
+    // 🔹 Pagination and query params
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 7;
+    const q = req.query.q?.trim() || "";
+    const all = req.query.all === "true";
     const skip = (page - 1) * limit;
-    const orders = await Order.find()
-      .sort({ createdAt: -1 })
-      .skip(skip)
-        .limit(limit)
-        .populate("Shipping");
+    const regex = new RegExp(q, "i");
+
+    // 🔹 Build the base aggregation pipeline
+    const pipeline = [
+      // Join shipping info
+      {
+        $lookup: {
+          from: "shippings", // collection name in MongoDB
+          localField: "Shipping",
+          foreignField: "_id",
+          as: "Shipping",
+        },
+      },
+      { $unwind: { path: "$Shipping", preserveNullAndEmptyArrays: true } },
+
+      // Unwind orderItems to access products
+      { $unwind: { path: "$orderItems", preserveNullAndEmptyArrays: true } },
+
+      // Lookup product details
+      {
+        $lookup: {
+          from: "products",
+          localField: "orderItems.product",
+          foreignField: "_id",
+          as: "orderItems.product",
+        },
+      },
+      {
+        $unwind: {
+          path: "$orderItems.product",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+
+      // 🔹 Optional search filter
+      ...(q
+        ? [
+            {
+              $match: {
+                $or: [
+                  { fullName: { $regex: regex } },
+                  { wilaya: { $regex: regex } },
+                  { telephone: { $regex: regex } },
+                  { orderStatus: { $regex: regex } },
+                  { commune: { $regex: regex } },
+                  { "orderItems.product.name": { $regex: regex } },
+                ],
+              },
+            },
+          ]
+        : []),
+
+      // Re-group by order (to restore full structure)
+      {
+        $group: {
+          _id: "$_id",
+          doc: { $first: "$$ROOT" },
+          orderItems: { $push: "$orderItems" },
+        },
+      },
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: ["$doc", { orderItems: "$orderItems" }],
+          },
+        },
+      },
+      { $sort: { createdAt: -1 } },
+    ];
+
+    // 🔹 If not "all", add pagination
+    if (!all) {
+      pipeline.push({ $skip: skip }, { $limit: limit });
+    }
+
+    // Run aggregation
+    const orders = await Order.aggregate(pipeline);
+
+    // 🔹 Stats aggregation (by orderStatus)
+    const counts = await Order.aggregate([
+      ...(q
+        ? [
+            {
+              $lookup: {
+                from: "products",
+                localField: "orderItems.product",
+                foreignField: "_id",
+                as: "products",
+              },
+            },
+            {
+              $unwind: { path: "$products", preserveNullAndEmptyArrays: true },
+            },
+            {
+              $match: {
+                $or: [
+                  { fullName: { $regex: regex } },
+                  { wilaya: { $regex: regex } },
+                  { telephone: { $regex: regex } },
+                  { orderStatus: { $regex: regex } },
+                  { commune: { $regex: regex } },
+                  { "products.name": { $regex: regex } },
+                ],
+              },
+            },
+          ]
+        : []),
+      { $group: { _id: "$orderStatus", count: { $sum: 1 } } },
+    ]);
+
+    const allStatuses = [
+      "confirmed",
+      "pending",
+      "shipped",
+      "cancelled",
+      "delivered",
+    ];
+    const stats = Object.fromEntries(
+      allStatuses.map((status) => [
+        status,
+        counts.find((c) => c._id === status)?.count || 0,
+      ])
+    );
+
     const totalOrders = await Order.countDocuments();
+
+    // 🔹 Response
     res.json({
+      stats,
+      totalPages: all ? 1 : Math.ceil(totalOrders / limit),
+      currentPage: page,
+      totalOrders: orders.length,
       orders,
-      totalPages: Math.ceil(totalOrders / limit),
-      currentPage: page
     });
   } catch (error) {
     console.error("Error fetching orders:", error);
@@ -144,7 +496,7 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ error: "Order not found" });
     }
     res.json(order);
-    } catch (error) {
+  } catch (error) {
     console.error("Error fetching order:", error);
     res.status(500).json({ error: "Internal server error" });
   }
@@ -154,16 +506,16 @@ router.get("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const orderId = req.params.id;
-    const order = await Order.findById(orderId);
+    const order = await Order.findByIdAndDelete(orderId);
 
     if (!order) {
       return res.status(404).json({ error: "Order not found" });
     }
-    // if order is confirmded and then deleted we need to restock the products 
+    // if order is confirmded and then deleted we need to restock the products
     if (order.orderStatus === "confirmed") {
-        await handleProductStock(order.orderItems, "increase");
+      await handleProductStock(order.orderItems, "increase");
     }
-    await order.remove();
+
     res.json({ message: "Order deleted successfully" });
   } catch (error) {
     console.error("Error deleting order:", error);
@@ -172,4 +524,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-
